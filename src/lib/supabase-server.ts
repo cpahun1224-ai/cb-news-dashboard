@@ -5,18 +5,30 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export function createServerClient(): SupabaseClient {
-  if (!supabaseUrl || !supabaseServiceKey ||
-      supabaseUrl.includes('PLACEHOLDER') || supabaseServiceKey.includes('PLACEHOLDER')) {
-    throw new Error('DEMO_MODE'); // 데모 모드 신호
+  // URL이 없거나 플레이스홀더면 데모 모드
+  if (!supabaseUrl || supabaseUrl.includes('PLACEHOLDER')) {
+    throw new Error('DEMO_MODE');
   }
-  return createClient(supabaseUrl, supabaseServiceKey, {
+  // 서비스 롤 키 우선, 없으면 anon 키로 폴백
+  const key =
+    supabaseServiceKey && !supabaseServiceKey.includes('PLACEHOLDER')
+      ? supabaseServiceKey
+      : supabaseAnonKey;
+  if (!key) {
+    throw new Error('DEMO_MODE');
+  }
+  return createClient(supabaseUrl, key, {
     auth: { persistSession: false },
   });
 }
 
 export const isSupabaseConfigured =
-  !!supabaseUrl && !!supabaseServiceKey &&
+  !!supabaseUrl &&
   !supabaseUrl.includes('PLACEHOLDER') &&
-  !supabaseServiceKey.includes('PLACEHOLDER');
+  !!(
+    (supabaseServiceKey && !supabaseServiceKey.includes('PLACEHOLDER')) ||
+    supabaseAnonKey
+  );
