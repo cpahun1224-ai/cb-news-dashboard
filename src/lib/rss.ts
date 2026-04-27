@@ -6,16 +6,8 @@ import Parser from 'rss-parser';
 import { calculateRelevanceScore, shouldExcludeNews, DEFAULT_KEYWORDS } from './relevance';
 import type { RssSource } from '@/types';
 
-// RSS 파서 설정
+// parseString 전용 파서 (customFields만 지정, timeout/headers는 fetch로 제어)
 const parser = new Parser({
-  timeout: 30000, // 30초 타임아웃
-  headers: {
-    // 브라우저에 가까운 User-Agent — Google News 등 봇 차단 우회
-    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Cache-Control': 'no-cache',
-  },
   customFields: {
     item: [
       ['media:content', 'mediaContent'],
@@ -24,6 +16,13 @@ const parser = new Parser({
     ],
   },
 });
+
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+  'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Cache-Control': 'no-cache',
+};
 
 /** RSS에서 파싱된 뉴스 아이템 */
 export interface ParsedNewsItem {
@@ -44,7 +43,37 @@ async function collectFromSource(
   keywords: { keyword: string; weight: number }[]
 ): Promise<ParsedNewsItem[]> {
   try {
-    const feed = await parser.parseURL(source.url);
+    // parseURL 대신 fetch + parseString 사용:
+    // - HTTP 상태코드 확인 가능 (HTML 오류페이지 차단)
+    // - 리다이렉트 처리 명시적
+    // - "Feed not recognized" 에러 시 더 상세한 원인 파악 가능
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    let text: string;
+    try {
+      const response = await fetch(source.url, {
+        signal: controller.signal,
+        headers: FETCH_HEADERS,
+        redirect: 'follow',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText} (${source.url})`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      // HTML이 반환된 경우 (봇 차단, 로그인 페이지 등) 조기 차단
+      if (contentType.includes('text/html') && !contentType.includes('xml')) {
+        throw new Error(`HTML 응답 수신 (봇 차단 의심) content-type: ${contentType}`);
+      }
+
+      text = await response.text();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const feed = await parser.parseString(text);
     const items: ParsedNewsItem[] = [];
 
     for (const item of feed.items || []) {
