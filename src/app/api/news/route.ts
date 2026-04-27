@@ -61,11 +61,25 @@ export async function GET(request: NextRequest) {
       });
 
     } catch (dbError) {
-      // Supabase 미연결 → 목업 데이터 반환
       const isDemoMode =
         dbError instanceof Error && dbError.message === 'DEMO_MODE';
-      if (!isDemoMode) console.error('DB 오류, 데모 모드 전환:', dbError);
 
+      // 실제 DB 에러(연결은 됐지만 쿼리 실패)는 데모 모드로 숨기지 않고 에러로 반환
+      if (!isDemoMode) {
+        console.error('[api/news] DB 오류:', dbError);
+        return NextResponse.json(
+          {
+            error: 'DB 조회 실패',
+            details: dbError instanceof Error ? dbError.message : String(dbError),
+            news: [],
+            total: 0,
+            demo: false,
+          },
+          { status: 500 }
+        );
+      }
+
+      // DEMO_MODE: 환경변수 미설정 시 목업 데이터 반환
       let filtered = MOCK_NEWS;
 
       if (category !== 'all') {
