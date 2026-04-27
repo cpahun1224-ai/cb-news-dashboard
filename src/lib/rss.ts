@@ -8,10 +8,13 @@ import type { RssSource } from '@/types';
 
 // RSS 파서 설정
 const parser = new Parser({
-  timeout: 10000, // 10초 타임아웃
+  timeout: 30000, // 30초 타임아웃
   headers: {
-    'User-Agent': 'CB-News-Dashboard/1.0 (News Aggregator)',
-    'Accept': 'application/rss+xml, application/xml, text/xml',
+    // 브라우저에 가까운 User-Agent — Google News 등 봇 차단 우회
+    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
   },
   customFields: {
     item: [
@@ -94,7 +97,8 @@ async function collectFromSource(
 
     return items;
   } catch (error) {
-    console.error(`RSS 수집 오류 [${source.name}]:`, error);
+    const msg = error instanceof Error ? error.message : JSON.stringify(error);
+    console.error(`[rss] 수집 오류 [${source.name}] ${source.url}: ${msg}`);
     return [];
   }
 }

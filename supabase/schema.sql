@@ -72,26 +72,34 @@ CREATE TABLE IF NOT EXISTS settings (
 -- ============================================================
 
 -- 기본 RSS 소스 (국내)
+-- Google News RSS는 Vercel 서버리스에서 차단되는 경우가 많아
+-- 직접 RSS를 제공하는 언론사 URL로 교체
 INSERT INTO rss_sources (name, url, category) VALUES
+  ('연합뉴스 경제',       'https://www.yonhapnews.co.kr/rss/economy.xml', 'domestic'),
+  ('연합뉴스 금융',       'https://www.yonhapnews.co.kr/rss/finance.xml', 'domestic'),
+  ('한국경제 금융',       'https://www.hankyung.com/feed/finance', 'domestic'),
+  ('한국경제 증권',       'https://www.hankyung.com/feed/stock', 'domestic'),
+  ('머니투데이 경제',     'https://news.mt.co.kr/mtview/rss/money.xml', 'domestic'),
+  ('이데일리 경제',       'https://www.edaily.co.kr/rss/rss010.xml', 'domestic'),
+  ('파이낸셜뉴스 경제',   'https://www.fnnews.com/rss/fn_economy_new.xml', 'domestic'),
   ('금융위원회 보도자료', 'https://www.fsc.go.kr/po010101/rss.do', 'domestic'),
-  ('금융감독원 보도자료', 'https://www.fss.or.kr/fss/kr/rss/rss01.jsp', 'domestic'),
-  ('한국은행 보도자료', 'https://www.bok.or.kr/portal/bbs/P0000559/list.do?menuNo=200690&pageIndex=1&rssYn=Y', 'domestic'),
-  ('구글뉴스-기업신용평가', 'https://news.google.com/rss/search?q=%EA%B8%B0%EC%97%85%EC%8B%A0%EC%9A%A9%ED%8F%89%EA%B0%80&hl=ko&gl=KR&ceid=KR:ko', 'domestic'),
-  ('구글뉴스-기업여신', 'https://news.google.com/rss/search?q=%EA%B8%B0%EC%97%85%EC%97%AC%EC%8B%A0+%EC%8B%A0%EC%9A%A9%ED%8F%89%EA%B0%80&hl=ko&gl=KR&ceid=KR:ko', 'domestic'),
-  ('구글뉴스-대안신용평가', 'https://news.google.com/rss/search?q=%EB%8C%80%EC%95%88%EC%8B%A0%EC%9A%A9%ED%8F%89%EA%B0%80+AI&hl=ko&gl=KR&ceid=KR:ko', 'domestic'),
-  ('구글뉴스-조기경보시스템', 'https://news.google.com/rss/search?q=%EC%A1%B0%EA%B8%B0%EA%B2%BD%EB%B3%B4%EC%8B%9C%EC%8A%A4%ED%85%9C+%EA%B8%88%EC%9C%B5&hl=ko&gl=KR&ceid=KR:ko', 'domestic'),
-  ('구글뉴스-금융AI', 'https://news.google.com/rss/search?q=%EA%B8%88%EC%9C%B5+AI+%EC%8B%A0%EC%9A%A9%ED%8F%89%EA%B0%80&hl=ko&gl=KR&ceid=KR:ko', 'domestic')
+  ('금융감독원 보도자료', 'https://www.fss.or.kr/fss/kr/rss/rss01.jsp', 'domestic')
 ON CONFLICT (url) DO NOTHING;
 
 -- 기본 RSS 소스 (글로벌)
 INSERT INTO rss_sources (name, url, category) VALUES
-  ('구글뉴스-SME Credit', 'https://news.google.com/rss/search?q=SME+credit+scoring+AI&hl=en&gl=US&ceid=US:en', 'global'),
-  ('구글뉴스-Alternative Credit', 'https://news.google.com/rss/search?q=alternative+credit+scoring+fintech&hl=en&gl=US&ceid=US:en', 'global'),
-  ('구글뉴스-Cash Flow Lending', 'https://news.google.com/rss/search?q=cash+flow+based+lending+credit&hl=en&gl=US&ceid=US:en', 'global'),
-  ('구글뉴스-ERP Credit', 'https://news.google.com/rss/search?q=ERP+data+credit+scoring+business&hl=en&gl=US&ceid=US:en', 'global'),
-  ('구글뉴스-Embedded Finance', 'https://news.google.com/rss/search?q=embedded+finance+SME+lending&hl=en&gl=US&ceid=US:en', 'global'),
-  ('McKinsey Insights', 'https://www.mckinsey.com/insights/rss', 'report'),
-  ('구글뉴스-AI Credit Risk', 'https://news.google.com/rss/search?q=AI+credit+risk+assessment+bank&hl=en&gl=US&ceid=US:en', 'global')
+  ('Reuters Business',      'https://feeds.reuters.com/reuters/businessNews', 'global'),
+  ('Reuters Finance',       'https://feeds.reuters.com/reuters/financialNewsAndInsight', 'global'),
+  ('Financial Times',       'https://www.ft.com/rss/home', 'global'),
+  ('구글뉴스-SME Credit',   'https://news.google.com/rss/search?q=SME+credit+scoring+AI&hl=en&gl=US&ceid=US:en', 'global'),
+  ('구글뉴스-Alt Credit',   'https://news.google.com/rss/search?q=alternative+credit+scoring+fintech&hl=en&gl=US&ceid=US:en', 'global'),
+  ('구글뉴스-AI Credit Risk','https://news.google.com/rss/search?q=AI+credit+risk+assessment+bank&hl=en&gl=US&ceid=US:en', 'global')
+ON CONFLICT (url) DO NOTHING;
+
+-- 리포트/공식자료
+INSERT INTO rss_sources (name, url, category) VALUES
+  ('BIS 보고서',   'https://www.bis.org/doclist/allbooks.rss', 'report'),
+  ('IMF 자료',     'https://www.imf.org/en/News/rss?language=eng&category=PR', 'report')
 ON CONFLICT (url) DO NOTHING;
 
 -- 기본 키워드

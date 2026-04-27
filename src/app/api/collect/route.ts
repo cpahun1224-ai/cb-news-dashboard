@@ -3,6 +3,9 @@
 // RSS 피드에서 뉴스를 수집하여 DB에 저장합니다.
 // ============================================================
 import { NextRequest, NextResponse } from 'next/server';
+
+// Vercel 서버리스 최대 실행 시간 (초) — Hobby 60, Pro 300
+export const maxDuration = 60;
 import { createServerClient } from '@/lib/supabase-server';
 import { collectAllFeeds, generateBasicSummary } from '@/lib/rss';
 import { analyzeNewsWithAI } from '@/lib/ai';
