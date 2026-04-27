@@ -8,8 +8,24 @@ import { collectAllFeeds, generateBasicSummary } from '@/lib/rss';
 import { analyzeNewsWithAI } from '@/lib/ai';
 import type { RssSource } from '@/types';
 
+/** 어떤 타입의 에러든 읽을 수 있는 문자열로 변환 */
+function serializeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null) {
+    // PostgrestError 등 Supabase 에러 객체 처리
+    return JSON.stringify(error);
+  }
+  return String(error);
+}
+
 export async function POST(request: NextRequest) {
   try {
+    // ?test=true 로 호출하면 RSS 수집 없이 Supabase insert만 테스트
+    const { searchParams } = new URL(request.url);
+    if (searchParams.get('test') === 'true') {
+      return handleTestInsert();
+    }
+
     // Cron 보안키 검증 (자동 수집 시)
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
@@ -30,7 +46,10 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('is_active', true);
 
-    if (sourcesError) throw sourcesError;
+    if (sourcesError) {
+      console.error('[api/collect] rss_sources 조회 오류:', JSON.stringify(sourcesError));
+      throw new Error(`rss_sources 조회 실패: ${JSON.stringify(sourcesError)}`);
+    }
     if (!sources || sources.length === 0) {
       return NextResponse.json({ error: 'RSS 소스가 없습니다.' }, { status: 400 });
     }
@@ -104,7 +123,9 @@ export async function POST(request: NextRequest) {
         if (insertError.code === '23505') {
           skippedCount++;
         } else {
-          saveErrors.push(`${item.title}: ${insertError.message}`);
+          const errDetail = `${item.title}: [${insertError.code}] ${insertError.message} | ${insertError.details || ''}`;
+          console.error('[api/collect] insert 오류:', errDetail);
+          saveErrors.push(errDetail);
         }
       } else {
         savedCount++;
@@ -127,11 +148,61 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('뉴스 수집 오류:', error);
+    const detail = serializeError(error);
+    console.error('[api/collect] 수집 오류:', detail);
     return NextResponse.json(
-      { error: '뉴스 수집 중 오류가 발생했습니다.', details: String(error) },
+      { error: '뉴스 수집 중 오류가 발생했습니다.', details: detail },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Supabase insert 단독 테스트 (RSS 없이)
+ * POST /api/collect?test=true 로 호출
+ */
+async function handleTestInsert(): Promise<NextResponse> {
+  const steps: string[] = [];
+  try {
+    steps.push('1. createServerClient() 호출');
+    const supabase = createServerClient();
+    steps.push('2. Supabase 클라이언트 생성 성공');
+
+    const testItem = {
+      title: '[TEST] Supabase insert 테스트',
+      source: 'test',
+      url: `https://test.example.com/test-${Date.now()}`,
+      published_at: new Date().toISOString(),
+      category: 'domestic',
+      relevance_score: 0.5,
+      raw_content: 'Supabase insert 연결 테스트용 데이터입니다.',
+      summary: 'insert 테스트',
+      insight: '',
+      action_idea: '',
+      is_featured: false,
+    };
+
+    steps.push('3. news 테이블에 insert 시도');
+    const { data, error } = await supabase.from('news').insert(testItem).select().single();
+
+    if (error) {
+      steps.push(`4. insert 실패: ${JSON.stringify(error)}`);
+      return NextResponse.json({ success: false, steps, error: JSON.stringify(error) }, { status: 500 });
+    }
+
+    steps.push(`4. insert 성공! id=${data?.id}`);
+
+    // 테스트 데이터 바로 삭제
+    if (data?.id) {
+      await supabase.from('news').delete().eq('id', data.id);
+      steps.push('5. 테스트 데이터 삭제 완료');
+    }
+
+    return NextResponse.json({ success: true, steps, message: 'Supabase insert/delete 정상 동작' });
+  } catch (err) {
+    const detail = serializeError(err);
+    steps.push(`예외 발생: ${detail}`);
+    return NextResponse.json({ success: false, steps, error: detail }, { status: 500 });
   }
 }
 
