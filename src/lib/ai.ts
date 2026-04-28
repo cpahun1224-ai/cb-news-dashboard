@@ -26,7 +26,8 @@ export async function analyzeNewsWithAI(
   try {
     return await analyzeWithGemini(title, rawContent);
   } catch (error) {
-    console.error('[ai] Gemini 분석 오류, 기본 분석으로 대체:', error);
+    const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error(`[ai] Gemini 분석 실패 — ${msg} | title="${title.slice(0, 40)}"`);
     return generateFallbackAnalysis(title, rawContent);
   }
 }

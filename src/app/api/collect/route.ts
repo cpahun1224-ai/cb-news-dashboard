@@ -78,7 +78,9 @@ export async function POST(request: NextRequest) {
     const minScore = parseFloat(settings.min_relevance_score || '0.1');
     const maxNews = parseInt(settings.max_news_per_day || '30');
     const aiEnabled = settings.ai_enabled !== 'false';
-    const hasGeminiKey = !!process.env.GEMINI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY || '';
+    const hasGeminiKey = !!geminiKey;
+    console.log(`[collect] GEMINI_API_KEY: ${hasGeminiKey ? geminiKey.slice(0, 10) + '...' : '❌ 미설정'} | ai_enabled=${aiEnabled}`);
 
     // 4. RSS 수집
     console.log(`RSS 수집 시작: ${sources.length}개 소스`);
