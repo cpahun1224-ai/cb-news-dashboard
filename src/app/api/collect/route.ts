@@ -11,8 +11,9 @@ import type { RssSource } from '@/types';
 // Vercel 서버리스 최대 실행 시간 (초) — Hobby 60, Pro 300
 export const maxDuration = 60;
 
-// Groq 무료 플랜: 30 RPM → 한 번에 최대 10건 병렬 분석
-const AI_ANALYSIS_LIMIT = 10;
+// Groq 무료 플랜: 30 RPM → 429 방지를 위해 최대 5건, 요청 간 2초 간격
+const AI_ANALYSIS_LIMIT = 5;
+const AI_REQUEST_DELAY_MS = 2000;
 
 function serializeError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -108,30 +109,18 @@ export async function POST(request: NextRequest) {
     const aiItems = (aiEnabled && hasGroqKey) ? filteredItems.slice(0, AI_ANALYSIS_LIMIT) : [];
     const basicItems = filteredItems.slice(aiItems.length);
 
-    console.log(`AI 분석: ${aiItems.length}건(Groq병렬) + ${basicItems.length}건(기본요약) | GROQ_KEY=${hasGroqKey ? '✅' : '❌없음'}`);
+    console.log(`AI 분석: ${aiItems.length}건(Groq순차,${AI_REQUEST_DELAY_MS}ms간격) + ${basicItems.length}건(기본요약) | GROQ_KEY=${hasGroqKey ? '✅' : '❌없음'}`);
 
-    // 병렬 Groq 분석 실행
-    const aiResults = await Promise.allSettled(
-      aiItems.map((item) => analyzeNewsWithAI(item.title, item.raw_content))
-    );
-
-    // URL → 분석결과 매핑
+    // 순차 Groq 분석 — 요청 간 딜레이로 429 방지
     type Analysis = { summary: string; insight: string; action_idea: string };
     const analysisMap = new Map<string, Analysis>();
 
-    aiResults.forEach((result, i) => {
+    for (let i = 0; i < aiItems.length; i++) {
       const item = aiItems[i];
-      if (result.status === 'fulfilled') {
-        analysisMap.set(item.url, result.value);
-      } else {
-        console.error(`[ai] ${item.title.slice(0, 40)} 분석 실패:`, result.reason);
-        analysisMap.set(item.url, {
-          summary: generateBasicSummary(item.raw_content),
-          insight: '',
-          action_idea: '',
-        });
-      }
-    });
+      if (i > 0) await new Promise((r) => setTimeout(r, AI_REQUEST_DELAY_MS));
+      const result = await analyzeNewsWithAI(item.title, item.raw_content);
+      analysisMap.set(item.url, result);
+    }
 
     basicItems.forEach((item) => {
       analysisMap.set(item.url, {

@@ -27,7 +27,8 @@ export async function analyzeNewsWithAI(
     return await analyzeWithGroq(title, rawContent);
   } catch (error) {
     const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    console.error(`[ai] Groq 분석 실패 — ${msg} | title="${title.slice(0, 40)}"`);
+    const is429 = msg.includes('429') || msg.toLowerCase().includes('rate limit');
+    console.error(`[ai] Groq 분석 실패(${is429 ? '429 rate limit' : '오류'}) — ${msg.slice(0, 120)} | title="${title.slice(0, 40)}"`);
     return generateFallbackAnalysis(title, rawContent);
   }
 }
