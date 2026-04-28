@@ -21,24 +21,27 @@ export function calculateRelevanceScore(
 ): number {
   const lowerText = text.toLowerCase();
   let totalScore = 0;
-  let maxPossibleScore = 0;
 
   for (const { keyword, weight } of keywords) {
     const lowerKeyword = keyword.toLowerCase();
-    maxPossibleScore += weight;
-
-    // 키워드가 텍스트에 포함되면 점수 추가
     if (lowerText.includes(lowerKeyword)) {
-      // 제목에 있으면 2배 가중치
+      // 첫 200자(제목 영역)에 있으면 2배 가중치
       const titleMultiplier = lowerText.slice(0, 200).includes(lowerKeyword) ? 2 : 1;
       totalScore += weight * titleMultiplier;
     }
   }
 
-  if (maxPossibleScore === 0) return 0;
+  if (totalScore === 0) return 0;
 
-  // 0~1 사이로 정규화 (최대 2배 가중치 고려)
-  const normalizedScore = Math.min(totalScore / (maxPossibleScore * 1.5), 1.0);
+  // 기존 방식: 전체 키워드 가중치 합(≈33~45)으로 나눔
+  // → 핵심 키워드 4개 이상 동시 매칭이 필요해 499건 전부 필터링됨
+  //
+  // 새 방식: 상위 3개 키워드가 제목에 모두 매칭될 때를 만점(1.0)으로 정규화
+  // → 핵심 키워드 1개 제목 매칭 시 ≈ 0.33, 2개 ≈ 0.67 으로 실용적인 점수 부여
+  const sortedWeights = [...keywords].sort((a, b) => b.weight - a.weight);
+  const top3TitleMax = sortedWeights.slice(0, 3).reduce((s, k) => s + k.weight * 2, 0);
+
+  const normalizedScore = Math.min(totalScore / top3TitleMax, 1.0);
   return Math.round(normalizedScore * 100) / 100;
 }
 

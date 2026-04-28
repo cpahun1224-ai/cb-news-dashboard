@@ -27,16 +27,20 @@ export default function Header() {
       const data = await res.json();
       if (data.success) {
         setCollectMsg(`✅ ${data.collected}건 저장`);
-        // 페이지 새로고침
         setTimeout(() => window.location.reload(), 1500);
       } else {
-        setCollectMsg(`❌ ${data.error || '오류'}`);
+        const errMsg = data.error || '오류';
+        setCollectMsg(`❌ ${errMsg}`);
+        console.error('[collect] 수집 실패:', data);
+        // 에러는 8초간 표시 (3초면 사용자가 못 봄)
+        setTimeout(() => setCollectMsg(''), 8000);
       }
-    } catch {
+    } catch (e) {
       setCollectMsg('❌ 네트워크 오류');
+      console.error('[collect] fetch 실패:', e);
+      setTimeout(() => setCollectMsg(''), 8000);
     } finally {
       setCollecting(false);
-      setTimeout(() => setCollectMsg(''), 3000);
     }
   };
 

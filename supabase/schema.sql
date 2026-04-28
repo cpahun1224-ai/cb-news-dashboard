@@ -134,7 +134,7 @@ INSERT INTO settings (key, value, description) VALUES
   ('recipient_emails', 'ceo@company.com', '뉴스레터 수신 이메일 목록 (쉼표 구분)'),
   ('send_time', '07:00', '뉴스레터 발송 시각 (HH:MM)'),
   ('max_news_per_day', '30', '하루 최대 수집 뉴스 수'),
-  ('min_relevance_score', '0.3', '최소 관련성 점수 (0~1)'),
+  ('min_relevance_score', '0.1', '최소 관련성 점수 (0~1)'),
   ('top_news_count', '5', 'TOP 뉴스 개수'),
   ('ai_enabled', 'true', 'AI 요약 활성화 여부'),
   ('newsletter_enabled', 'true', '뉴스레터 발송 활성화 여부'),

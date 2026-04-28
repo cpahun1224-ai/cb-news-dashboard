@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     const settings = Object.fromEntries(
       (settingsData || []).map((s: { key: string; value: string }) => [s.key, s.value])
     );
-    const minScore = parseFloat(settings.min_relevance_score || '0.3');
+    const minScore = parseFloat(settings.min_relevance_score || '0.1');
     const maxNews = parseInt(settings.max_news_per_day || '30');
     const aiEnabled = settings.ai_enabled !== 'false';
 
@@ -85,6 +85,14 @@ export async function POST(request: NextRequest) {
     console.log(`수집된 뉴스: ${items.length}건, 오류: ${errors.length}건`);
 
     // 5. 관련성 점수 필터링
+    const scoreDistribution = {
+      zero: items.filter((i) => i.relevance_score === 0).length,
+      low: items.filter((i) => i.relevance_score > 0 && i.relevance_score < 0.1).length,
+      medium: items.filter((i) => i.relevance_score >= 0.1 && i.relevance_score < 0.3).length,
+      high: items.filter((i) => i.relevance_score >= 0.3).length,
+    };
+    console.log(`점수 분포: 0점=${scoreDistribution.zero}, 0~0.1=${scoreDistribution.low}, 0.1~0.3=${scoreDistribution.medium}, 0.3+=${scoreDistribution.high}, minScore=${minScore}`);
+
     const filteredItems = items
       .filter((item) => item.relevance_score >= minScore)
       .slice(0, maxNews);
@@ -148,6 +156,7 @@ export async function POST(request: NextRequest) {
       filtered_out: items.length - filteredItems.length,
       errors: [...errors, ...saveErrors],
       sources_processed: processedSources,
+      debug: { total_fetched: items.length, min_score_used: minScore, score_distribution: scoreDistribution },
     });
 
   } catch (error) {
