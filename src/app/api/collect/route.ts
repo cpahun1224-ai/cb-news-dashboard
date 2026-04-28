@@ -11,7 +11,7 @@ import type { RssSource } from '@/types';
 // Vercel 서버리스 최대 실행 시간 (초) — Hobby 60, Pro 300
 export const maxDuration = 60;
 
-// Gemini 무료 플랜: 15 RPM → 한 번에 최대 10건만 AI 분석
+// Groq 무료 플랜: 30 RPM → 한 번에 최대 10건 병렬 분석
 const AI_ANALYSIS_LIMIT = 10;
 
 function serializeError(error: unknown): string {
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       return handleTestInsert();
     }
 
-    // ?ai_test=true: Gemini API만 단독 테스트
+    // ?ai_test=true: Groq API만 단독 테스트
     if (searchParams.get('ai_test') === 'true') {
       return handleAiTest();
     }
@@ -78,9 +78,9 @@ export async function POST(request: NextRequest) {
     const minScore = parseFloat(settings.min_relevance_score || '0.1');
     const maxNews = parseInt(settings.max_news_per_day || '30');
     const aiEnabled = settings.ai_enabled !== 'false';
-    const geminiKey = process.env.GEMINI_API_KEY || '';
-    const hasGeminiKey = !!geminiKey;
-    console.log(`[collect] GEMINI_API_KEY: ${hasGeminiKey ? geminiKey.slice(0, 10) + '...' : '❌ 미설정'} | ai_enabled=${aiEnabled}`);
+    const groqKey = process.env.GROQ_API_KEY || '';
+    const hasGroqKey = !!groqKey;
+    console.log(`[collect] GROQ_API_KEY: ${hasGroqKey ? groqKey.slice(0, 10) + '...' : '❌ 미설정'} | ai_enabled=${aiEnabled}`);
 
     // 4. RSS 수집
     console.log(`RSS 수집 시작: ${sources.length}개 소스`);
@@ -104,13 +104,13 @@ export async function POST(request: NextRequest) {
       .slice(0, maxNews);
 
     // 6. AI 분석 — 병렬 처리 (상위 AI_ANALYSIS_LIMIT건만, 나머지는 기본 요약)
-    // Gemini 무료: 15 RPM / 2 RPS → 10건 병렬은 안전
-    const aiItems = (aiEnabled && hasGeminiKey) ? filteredItems.slice(0, AI_ANALYSIS_LIMIT) : [];
+    // Groq 무료: 30 RPM → 10건 병렬은 안전
+    const aiItems = (aiEnabled && hasGroqKey) ? filteredItems.slice(0, AI_ANALYSIS_LIMIT) : [];
     const basicItems = filteredItems.slice(aiItems.length);
 
-    console.log(`AI 분석: ${aiItems.length}건(Gemini병렬) + ${basicItems.length}건(기본요약) | GEMINI_KEY=${hasGeminiKey ? '✅' : '❌없음'}`);
+    console.log(`AI 분석: ${aiItems.length}건(Groq병렬) + ${basicItems.length}건(기본요약) | GROQ_KEY=${hasGroqKey ? '✅' : '❌없음'}`);
 
-    // 병렬 Gemini 분석 실행
+    // 병렬 Groq 분석 실행
     const aiResults = await Promise.allSettled(
       aiItems.map((item) => analyzeNewsWithAI(item.title, item.raw_content))
     );
@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
         total_fetched: items.length,
         min_score_used: minScore,
         score_distribution: scoreDistribution,
-        gemini_key_present: hasGeminiKey,
+        groq_key_present: hasGroqKey,
         ai_enabled_setting: aiEnabled,
       },
     });
@@ -218,25 +218,25 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Gemini API 단독 테스트 — POST /api/collect?ai_test=true
- * RSS 수집 및 DB 저장 없이 Gemini 응답만 반환합니다.
+ * Groq API 단독 테스트 — POST /api/collect?ai_test=true
+ * RSS 수집 및 DB 저장 없이 Groq 응답만 반환합니다.
  */
 async function handleAiTest(): Promise<NextResponse> {
   const steps: string[] = [];
-  const keyPresent = !!process.env.GEMINI_API_KEY;
-  steps.push(`GEMINI_API_KEY: ${keyPresent ? '✅ 있음' : '❌ 없음 (환경변수 미설정)'}`);
+  const keyPresent = !!process.env.GROQ_API_KEY;
+  steps.push(`GROQ_API_KEY: ${keyPresent ? '✅ 있음' : '❌ 없음 (환경변수 미설정)'}`);
 
   if (!keyPresent) {
-    return NextResponse.json({ success: false, steps, error: 'GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' });
+    return NextResponse.json({ success: false, steps, error: 'GROQ_API_KEY 환경변수가 설정되지 않았습니다.' });
   }
 
   try {
-    steps.push('Gemini 분석 요청 시작...');
+    steps.push('Groq 분석 요청 시작...');
     const sampleTitle = '금융위원회, AI 기반 기업신용평가 시스템 도입 가이드라인 발표';
     const sampleContent = '금융위원회가 AI와 비정형 데이터를 활용한 대안신용평가 모델 도입을 위한 가이드라인을 발표했다. 기업여신 심사에서 ERP 데이터와 현금흐름 기반 신용평가를 허용하는 내용을 담고 있으며, 조기경보시스템(EWS) 고도화도 포함된다.';
 
     const result = await analyzeNewsWithAI(sampleTitle, sampleContent);
-    steps.push('Gemini 분석 완료');
+    steps.push('Groq 분석 완료');
 
     return NextResponse.json({
       success: true,

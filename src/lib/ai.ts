@@ -1,6 +1,6 @@
 // ============================================================
-// AI 분석 모듈 (Google Gemini API 연동)
-// GEMINI_API_KEY가 없으면 기본 텍스트 처리로 동작합니다.
+// AI 분석 모듈 (Groq API — llama-3.1-8b-instant)
+// GROQ_API_KEY가 없으면 기본 텍스트 처리로 동작합니다.
 // ============================================================
 
 import { generateBasicSummary } from './rss';
@@ -12,22 +12,22 @@ export interface AIAnalysis {
 }
 
 /**
- * Gemini로 뉴스를 분석합니다.
- * GEMINI_API_KEY가 없으면 기본 분석을 반환합니다.
+ * Groq로 뉴스를 분석합니다.
+ * GROQ_API_KEY가 없으면 기본 분석을 반환합니다.
  */
 export async function analyzeNewsWithAI(
   title: string,
   rawContent: string
 ): Promise<AIAnalysis> {
-  if (!process.env.GEMINI_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     return generateFallbackAnalysis(title, rawContent);
   }
 
   try {
-    return await analyzeWithGemini(title, rawContent);
+    return await analyzeWithGroq(title, rawContent);
   } catch (error) {
     const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    console.error(`[ai] Gemini 분석 실패 — ${msg} | title="${title.slice(0, 40)}"`);
+    console.error(`[ai] Groq 분석 실패 — ${msg} | title="${title.slice(0, 40)}"`);
     return generateFallbackAnalysis(title, rawContent);
   }
 }
@@ -49,17 +49,20 @@ function buildAnalysisPrompt(title: string, rawContent: string): string {
 분석 관점: 기업신용평가, 대안신용평가, AI 여신심사, EWS, 금융 AI, 기업여신`;
 }
 
-/** Gemini Flash로 단일 뉴스 분석 */
-async function analyzeWithGemini(title: string, rawContent: string): Promise<AIAnalysis> {
-  const { GoogleGenerativeAI } = await import('@google/generative-ai');
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
-    generationConfig: { temperature: 0.3, maxOutputTokens: 600 },
+/** Groq llama-3.1-8b-instant로 단일 뉴스 분석 */
+async function analyzeWithGroq(title: string, rawContent: string): Promise<AIAnalysis> {
+  const Groq = (await import('groq-sdk')).default;
+  const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+  const completion = await client.chat.completions.create({
+    model: 'llama-3.1-8b-instant',
+    messages: [{ role: 'user', content: buildAnalysisPrompt(title, rawContent) }],
+    temperature: 0.3,
+    max_tokens: 600,
   });
 
-  const result = await model.generateContent(buildAnalysisPrompt(title, rawContent));
-  return parseAIResponse(result.response.text());
+  const content = completion.choices[0]?.message?.content || '';
+  return parseAIResponse(content);
 }
 
 /** JSON 응답 파싱 */
@@ -93,7 +96,7 @@ function generateFallbackAnalysis(title: string, rawContent: string): AIAnalysis
  * 오늘 수집된 뉴스 제목 목록으로 일일 트렌드 요약을 생성합니다.
  */
 export async function generateDailySummary(newsTitles: string[]): Promise<string> {
-  if (!process.env.GEMINI_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     return `오늘 총 ${newsTitles.length}건의 관련 뉴스가 수집되었습니다.`;
   }
 
@@ -105,14 +108,17 @@ CB 본부장에게 보고하는 형식으로 오늘의 핵심 트렌드를 3~4�
 기업신용평가, 대안신용평가, AI 여신심사, EWS 관점에서 중요한 사항을 강조하세요.`;
 
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: { temperature: 0.3, maxOutputTokens: 300 },
+    const Groq = (await import('groq-sdk')).default;
+    const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+    const completion = await client.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 300,
     });
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+
+    return completion.choices[0]?.message?.content || `오늘 총 ${newsTitles.length}건의 관련 뉴스가 수집되었습니다.`;
   } catch (error) {
     console.error('[ai] 일일 요약 생성 오류:', error);
     return `오늘 총 ${newsTitles.length}건의 관련 뉴스가 수집되었습니다.`;
