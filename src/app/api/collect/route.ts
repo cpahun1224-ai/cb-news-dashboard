@@ -11,22 +11,27 @@ import type { RssSource } from '@/types';
 // Vercel 서버리스 최대 실행 시간 (초) — Hobby 60, Pro 300
 export const maxDuration = 60;
 
-/** 어떤 타입의 에러든 읽을 수 있는 문자열로 변환 */
+// Gemini 무료 플랜: 15 RPM → 한 번에 최대 10건만 AI 분석
+const AI_ANALYSIS_LIMIT = 10;
+
 function serializeError(error: unknown): string {
   if (error instanceof Error) return error.message;
-  if (typeof error === 'object' && error !== null) {
-    // PostgrestError 등 Supabase 에러 객체 처리
-    return JSON.stringify(error);
-  }
+  if (typeof error === 'object' && error !== null) return JSON.stringify(error);
   return String(error);
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // ?test=true 로 호출하면 RSS 수집 없이 Supabase insert만 테스트
     const { searchParams } = new URL(request.url);
+
+    // ?test=true: RSS 없이 Supabase insert만 테스트
     if (searchParams.get('test') === 'true') {
       return handleTestInsert();
+    }
+
+    // ?ai_test=true: Gemini API만 단독 테스트
+    if (searchParams.get('ai_test') === 'true') {
+      return handleAiTest();
     }
 
     // Cron 보안키 검증 (자동 수집 시)
@@ -34,7 +39,6 @@ export async function POST(request: NextRequest) {
     const cronSecret = process.env.CRON_SECRET;
 
     if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      // 수동 호출 허용 (개발 환경)
       const body = await request.json().catch(() => ({}));
       if (!body.manual) {
         return NextResponse.json({ error: '인증 실패' }, { status: 401 });
@@ -74,6 +78,7 @@ export async function POST(request: NextRequest) {
     const minScore = parseFloat(settings.min_relevance_score || '0.1');
     const maxNews = parseInt(settings.max_news_per_day || '30');
     const aiEnabled = settings.ai_enabled !== 'false';
+    const hasGeminiKey = !!process.env.GEMINI_API_KEY;
 
     // 4. RSS 수집
     console.log(`RSS 수집 시작: ${sources.length}개 소스`);
@@ -81,7 +86,6 @@ export async function POST(request: NextRequest) {
       sources as RssSource[],
       keywords || []
     );
-
     console.log(`수집된 뉴스: ${items.length}건, 오류: ${errors.length}건`);
 
     // 5. 관련성 점수 필터링
@@ -91,27 +95,64 @@ export async function POST(request: NextRequest) {
       medium: items.filter((i) => i.relevance_score >= 0.1 && i.relevance_score < 0.3).length,
       high: items.filter((i) => i.relevance_score >= 0.3).length,
     };
-    console.log(`점수 분포: 0점=${scoreDistribution.zero}, 0~0.1=${scoreDistribution.low}, 0.1~0.3=${scoreDistribution.medium}, 0.3+=${scoreDistribution.high}, minScore=${minScore}`);
+    console.log(`점수 분포 zero=${scoreDistribution.zero} low=${scoreDistribution.low} medium=${scoreDistribution.medium} high=${scoreDistribution.high} minScore=${minScore}`);
 
     const filteredItems = items
       .filter((item) => item.relevance_score >= minScore)
       .slice(0, maxNews);
 
-    // 6. DB에 저장 (이미 존재하는 URL은 스킵)
+    // 6. AI 분석 — 병렬 처리 (상위 AI_ANALYSIS_LIMIT건만, 나머지는 기본 요약)
+    // Gemini 무료: 15 RPM / 2 RPS → 10건 병렬은 안전
+    const aiItems = (aiEnabled && hasGeminiKey) ? filteredItems.slice(0, AI_ANALYSIS_LIMIT) : [];
+    const basicItems = filteredItems.slice(aiItems.length);
+
+    console.log(`AI 분석: ${aiItems.length}건(Gemini병렬) + ${basicItems.length}건(기본요약) | GEMINI_KEY=${hasGeminiKey ? '✅' : '❌없음'}`);
+
+    // 병렬 Gemini 분석 실행
+    const aiResults = await Promise.allSettled(
+      aiItems.map((item) => analyzeNewsWithAI(item.title, item.raw_content))
+    );
+
+    // URL → 분석결과 매핑
+    type Analysis = { summary: string; insight: string; action_idea: string };
+    const analysisMap = new Map<string, Analysis>();
+
+    aiResults.forEach((result, i) => {
+      const item = aiItems[i];
+      if (result.status === 'fulfilled') {
+        analysisMap.set(item.url, result.value);
+      } else {
+        console.error(`[ai] ${item.title.slice(0, 40)} 분석 실패:`, result.reason);
+        analysisMap.set(item.url, {
+          summary: generateBasicSummary(item.raw_content),
+          insight: '',
+          action_idea: '',
+        });
+      }
+    });
+
+    basicItems.forEach((item) => {
+      analysisMap.set(item.url, {
+        summary: generateBasicSummary(item.raw_content),
+        insight: '',
+        action_idea: '',
+      });
+    });
+
+    // 7. DB에 저장 (이미 존재하는 URL은 스킵)
     let savedCount = 0;
     let skippedCount = 0;
+    let aiAnalyzedCount = 0;
     const saveErrors: string[] = [];
 
     for (const item of filteredItems) {
-      // AI 분석 (활성화된 경우)
-      let analysis = { summary: '', insight: '', action_idea: '' };
-      if (aiEnabled) {
-        analysis = await analyzeNewsWithAI(item.title, item.raw_content);
-      } else {
-        analysis.summary = generateBasicSummary(item.raw_content);
-      }
+      const analysis = analysisMap.get(item.url) ?? {
+        summary: generateBasicSummary(item.raw_content),
+        insight: '',
+        action_idea: '',
+      };
+      if (analysis.insight) aiAnalyzedCount++;
 
-      // DB 저장 (중복 URL은 자동 스킵)
       const { error: insertError } = await supabase
         .from('news')
         .insert({
@@ -125,12 +166,10 @@ export async function POST(request: NextRequest) {
           summary: analysis.summary,
           insight: analysis.insight,
           action_idea: analysis.action_idea,
-          // 관련성 점수 0.8 이상은 주요 뉴스로 자동 선정
           is_featured: item.relevance_score >= 0.8,
         });
 
       if (insertError) {
-        // unique 제약 위반 = 이미 존재하는 URL
         if (insertError.code === '23505') {
           skippedCount++;
         } else {
@@ -143,7 +182,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 7. 소스 마지막 수집 시각 업데이트
+    // 8. 소스 마지막 수집 시각 업데이트
     await supabase
       .from('rss_sources')
       .update({ last_collected_at: new Date().toISOString() })
@@ -154,9 +193,16 @@ export async function POST(request: NextRequest) {
       collected: savedCount,
       skipped: skippedCount,
       filtered_out: items.length - filteredItems.length,
+      ai_analyzed: aiAnalyzedCount,
       errors: [...errors, ...saveErrors],
       sources_processed: processedSources,
-      debug: { total_fetched: items.length, min_score_used: minScore, score_distribution: scoreDistribution },
+      debug: {
+        total_fetched: items.length,
+        min_score_used: minScore,
+        score_distribution: scoreDistribution,
+        gemini_key_present: hasGeminiKey,
+        ai_enabled_setting: aiEnabled,
+      },
     });
 
   } catch (error) {
@@ -166,6 +212,40 @@ export async function POST(request: NextRequest) {
       { error: '뉴스 수집 중 오류가 발생했습니다.', details: detail },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Gemini API 단독 테스트 — POST /api/collect?ai_test=true
+ * RSS 수집 및 DB 저장 없이 Gemini 응답만 반환합니다.
+ */
+async function handleAiTest(): Promise<NextResponse> {
+  const steps: string[] = [];
+  const keyPresent = !!process.env.GEMINI_API_KEY;
+  steps.push(`GEMINI_API_KEY: ${keyPresent ? '✅ 있음' : '❌ 없음 (환경변수 미설정)'}`);
+
+  if (!keyPresent) {
+    return NextResponse.json({ success: false, steps, error: 'GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' });
+  }
+
+  try {
+    steps.push('Gemini 분석 요청 시작...');
+    const sampleTitle = '금융위원회, AI 기반 기업신용평가 시스템 도입 가이드라인 발표';
+    const sampleContent = '금융위원회가 AI와 비정형 데이터를 활용한 대안신용평가 모델 도입을 위한 가이드라인을 발표했다. 기업여신 심사에서 ERP 데이터와 현금흐름 기반 신용평가를 허용하는 내용을 담고 있으며, 조기경보시스템(EWS) 고도화도 포함된다.';
+
+    const result = await analyzeNewsWithAI(sampleTitle, sampleContent);
+    steps.push('Gemini 분석 완료');
+
+    return NextResponse.json({
+      success: true,
+      steps,
+      sample_title: sampleTitle,
+      analysis: result,
+    });
+  } catch (err) {
+    const detail = serializeError(err);
+    steps.push(`오류 발생: ${detail}`);
+    return NextResponse.json({ success: false, steps, error: detail }, { status: 500 });
   }
 }
 
@@ -204,7 +284,6 @@ async function handleTestInsert(): Promise<NextResponse> {
 
     steps.push(`4. insert 성공! id=${data?.id}`);
 
-    // 테스트 데이터 바로 삭제
     if (data?.id) {
       await supabase.from('news').delete().eq('id', data.id);
       steps.push('5. 테스트 데이터 삭제 완료');
@@ -227,6 +306,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: '인증 실패' }, { status: 401 });
   }
 
-  // POST와 동일한 로직 실행
   return POST(new NextRequest(request.url, { method: 'POST', headers: request.headers }));
 }
